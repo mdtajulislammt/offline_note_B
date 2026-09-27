@@ -1,0 +1,23 @@
+# Binaries
+offline_note_backend
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Environment files
+.env
+.env.local
+
+# IDE and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
