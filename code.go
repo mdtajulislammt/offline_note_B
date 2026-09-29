@@ -57,3 +57,16 @@ func GenerateRoomCode() (string, error) {
 }
 
 // ValidateRoomCode checks whether a given string is a strictly valid "XXXX-XXXX" code.
+func ValidateRoomCode(code string) bool {
+	return codeRegex.MatchString(code)
+}
+
+// NormalizeRoomCode converts room codes to uppercase and ensures proper hyphenation
+// if provided without a hyphen (e.g. "ABCDEFGH" -> "ABCD-EFGH").
+func NormalizeRoomCode(code string) string {
+	cleaned := strings.ToUpper(strings.TrimSpace(code))
+	if len(cleaned) == CodeTotalLength && !strings.Contains(cleaned, "-") {
+		return cleaned[:CodeHalfLength] + "-" + cleaned[CodeHalfLength:]
+	}
+	return cleaned
+}
