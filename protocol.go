@@ -111,3 +111,48 @@ type GroupPeerNotification struct {
 }
 
 // BuildEnvelope creates a serialized JSON SignalEnvelope with arbitrary struct payload.
+func BuildEnvelope(msgType, room, from, to string, payload any) ([]byte, error) {
+	var rawPayload json.RawMessage
+	if payload != nil {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		rawPayload = data
+	}
+
+	env := SignalEnvelope{
+		Type:    msgType,
+		Room:    room,
+		From:    from,
+		To:      to,
+		Payload: rawPayload,
+	}
+	return json.Marshal(env)
+}
+
+// BuildRawEnvelope creates a serialized JSON SignalEnvelope with pre-encoded json.RawMessage payload.
+func BuildRawEnvelope(msgType, room, from, to string, rawPayload json.RawMessage) ([]byte, error) {
+	env := SignalEnvelope{
+		Type:    msgType,
+		Room:    room,
+		From:    from,
+		To:      to,
+		Payload: rawPayload,
+	}
+	return json.Marshal(env)
+}
+
+// BuildErrorEnvelope creates a standard error envelope bytes.
+func BuildErrorEnvelope(code, message, room string) []byte {
+	env, _ := BuildEnvelope(TypeError, room, "system", "", ErrorPayload{
+		Code:    code,
+		Message: message,
+	})
+	return env
+}
+
+// NowMillis returns current epoch timestamp in milliseconds.
+func NowMillis() int64 {
+	return time.Now().UnixMilli()
+}
