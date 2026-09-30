@@ -98,3 +98,16 @@ type P2PPeerJoinedPayload struct {
 }
 
 // GroupJoinedPayload provides initial membership to a joining group participant.
+type GroupJoinedPayload struct {
+	Room    string   `json:"room"`
+	Members []string `json:"members"`
+}
+
+// GroupPeerNotification describes a member joining or leaving a group.
+type GroupPeerNotification struct {
+	PeerID string `json:"peer_id"`
+	Alias  string `json:"alias,omitempty"`
+	Room   string `json:"room"`
+}
+
+// BuildEnvelope creates a serialized JSON SignalEnvelope with arbitrary struct payload.
