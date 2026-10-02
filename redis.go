@@ -173,3 +173,45 @@ func (r *RedisStore) GetP2PRoom(ctx context.Context, code string) (*P2PRoom, err
 }
 
 // PairP2PRoom executes atomic pairing via Lua script.
+func (r *RedisStore) PairP2PRoom(ctx context.Context, code, peerID string) (*P2PRoom, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	key := KeyPrefixP2P + code
+	res, err := pairP2PRoomLua.Run(ctx, r.client, []string{key}, peerID).Result()
+	if err != nil {
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "ERR_ROOM_NOT_FOUND") || errors.Is(err, redis.Nil):
+			return nil, ErrRoomNotFound
+		case strings.Contains(errMsg, "ERR_ROOM_ALREADY_PAIRED"):
+			return nil, ErrRoomAlreadyPaired
+		case strings.Contains(errMsg, "ERR_HOST_CANNOT_BE_PEER"):
+			return nil, errors.New("host cannot join their own room as peer")
+		default:
+			return nil, fmt.Errorf("redis pair lua error: %w", err)
+		}
+	}
+
+	rawJSON, ok := res.(string)
+	if !ok {
+		return nil, errors.New("invalid lua return format")
+	}
+
+	var room P2PRoom
+	if err := json.Unmarshal([]byte(rawJSON), &room); err != nil {
+		return nil, fmt.Errorf("failed to parse paired room json: %w", err)
+	}
+
+	return &room, nil
+}
+
+// DeleteP2PRoom removes a P2P room key.
+func (r *RedisStore) DeleteP2PRoom(ctx context.Context, code string) error {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	return r.client.Del(ctx, KeyPrefixP2P+code).Err()
+}
+
+// -----------------------------------------------------------------------------
