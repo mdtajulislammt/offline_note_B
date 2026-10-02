@@ -116,3 +116,60 @@ func (r *RedisStore) ensureContext(ctx context.Context) (context.Context, contex
 }
 
 // -----------------------------------------------------------------------------
+// 1-on-1 Ephemeral P2P Room Operations
+// -----------------------------------------------------------------------------
+
+// CreateP2PRoom creates an ephemeral room key `room:p2p:{code}` with 60s TTL.
+// Returns ErrRoomCodeConflict if the code already exists.
+func (r *RedisStore) CreateP2PRoom(ctx context.Context, code, hostID string) (*P2PRoom, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	room := &P2PRoom{
+		Code:      code,
+		HostID:    hostID,
+		Status:    "waiting",
+		CreatedAt: time.Now().Unix(),
+	}
+
+	data, err := json.Marshal(room)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal p2p room: %w", err)
+	}
+
+	key := KeyPrefixP2P + code
+	// SetNX enforces uniqueness: fails if code already exists
+	set, err := r.client.SetNX(ctx, key, data, P2PRoomTTL).Result()
+	if err != nil {
+		return nil, fmt.Errorf("redis setnx error: %w", err)
+	}
+	if !set {
+		return nil, ErrRoomCodeConflict
+	}
+
+	return room, nil
+}
+
+// GetP2PRoom retrieves room data for the given code.
+func (r *RedisStore) GetP2PRoom(ctx context.Context, code string) (*P2PRoom, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	key := KeyPrefixP2P + code
+	val, err := r.client.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return nil, ErrRoomNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("redis get p2p room error: %w", err)
+	}
+
+	var room P2PRoom
+	if err := json.Unmarshal([]byte(val), &room); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal p2p room: %w", err)
+	}
+
+	return &room, nil
+}
+
+// PairP2PRoom executes atomic pairing via Lua script.
