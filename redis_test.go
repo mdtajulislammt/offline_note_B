@@ -86,3 +86,45 @@ func TestRedisP2PRoomLifecycle(t *testing.T) {
 	}
 }
 
+func TestRedisP2PRoomConcurrentPairRace(t *testing.T) {
+	store := setupTestRedis(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	code, _ := GenerateRoomCode()
+	hostID := "host-" + uuid.NewString()
+
+	_, err := store.CreateP2PRoom(ctx, code, hostID)
+	if err != nil {
+		t.Fatalf("create failed: %v", err)
+	}
+	defer store.DeleteP2PRoom(ctx, code)
+
+	// Launch 10 simultaneous peers attempting to pair the same 1-on-1 code
+	const peers = 10
+	var wg sync.WaitGroup
+	successCount := 0
+	var mu sync.Mutex
+
+	for i := 0; i < peers; i++ {
+		wg.Add(1)
+		pID := fmt.Sprintf("peer-%d-%s", i, uuid.NewString())
+		go func(peer string) {
+			defer wg.Done()
+			_, err := store.PairP2PRoom(ctx, code, peer)
+			if err == nil {
+				mu.Lock()
+				successCount++
+				mu.Unlock()
+			}
+		}(pID)
+	}
+
+	wg.Wait()
+
+	// Exactly 1 peer must succeed; all other 9 must fail!
+	if successCount != 1 {
+		t.Fatalf("expected exactly 1 peer to successfully pair, got %d", successCount)
+	}
+}
+
