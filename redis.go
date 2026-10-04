@@ -274,3 +274,48 @@ func (r *RedisStore) GetGroupMembers(ctx context.Context, code string) ([]string
 }
 
 // -----------------------------------------------------------------------------
+// Public Chat Stream Operations (LPush & LTrim capped at 50 messages)
+// -----------------------------------------------------------------------------
+
+// PushPublicMessage prepends a message to `chat:public:stream` and caps at 50 entries.
+func (r *RedisStore) PushPublicMessage(ctx context.Context, msgBytes []byte) error {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	pipe := r.client.Pipeline()
+	pipe.LPush(ctx, KeyPublicStream, msgBytes)
+	pipe.LTrim(ctx, KeyPublicStream, 0, PublicStreamCap-1)
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to push public stream message: %w", err)
+	}
+	return nil
+}
+
+// GetPublicMessages returns up to `limit` recent messages from `chat:public:stream`.
+// Returns messages in chronological order (oldest to newest).
+func (r *RedisStore) GetPublicMessages(ctx context.Context, limit int64) ([][]byte, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	if limit <= 0 || limit > PublicStreamCap {
+		limit = PublicStreamCap
+	}
+
+	// LRANGE 0 limit-1 returns newest to oldest because LPUSH inserts at head
+	results, err := r.client.LRange(ctx, KeyPublicStream, 0, limit-1).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch public messages: %w", err)
+	}
+
+	// Reverse to deliver in chronological order (oldest -> newest)
+	n := len(results)
+	messages := make([][]byte, n)
+	for i, raw := range results {
+		messages[n-1-i] = []byte(raw)
+	}
+
+	return messages, nil
+}
+
+// -----------------------------------------------------------------------------
