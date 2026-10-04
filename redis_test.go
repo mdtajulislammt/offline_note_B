@@ -128,3 +128,86 @@ func TestRedisP2PRoomConcurrentPairRace(t *testing.T) {
 	}
 }
 
+func TestRedisGroupRooms(t *testing.T) {
+	store := setupTestRedis(t)
+	defer store.Close()
+
+	ctx := context.Background()
+	groupCode := "GROUP-" + uuid.NewString()[:8]
+	client1 := "client-1"
+	client2 := "client-2"
+
+	// Add member 1 & 2
+	if err := store.AddGroupMember(ctx, groupCode, client1); err != nil {
+		t.Fatalf("failed to add member 1: %v", err)
+	}
+	if err := store.AddGroupMember(ctx, groupCode, client2); err != nil {
+		t.Fatalf("failed to add member 2: %v", err)
+	}
+
+	members, err := store.GetGroupMembers(ctx, groupCode)
+	if err != nil {
+		t.Fatalf("failed to get group members: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("expected 2 group members, got %d", len(members))
+	}
+
+	// Remove member 1
+	rem, err := store.RemoveGroupMember(ctx, groupCode, client1)
+	if err != nil {
+		t.Fatalf("failed to remove member 1: %v", err)
+	}
+	if rem != 1 {
+		t.Fatalf("expected 1 remaining member, got %d", rem)
+	}
+
+	// Remove member 2 (room should be emptied and deleted)
+	rem, err = store.RemoveGroupMember(ctx, groupCode, client2)
+	if err != nil {
+		t.Fatalf("failed to remove member 2: %v", err)
+	}
+	if rem != 0 {
+		t.Fatalf("expected 0 remaining members, got %d", rem)
+	}
+}
+
+func TestRedisPublicChatStreamCapping(t *testing.T) {
+	store := setupTestRedis(t)
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Clean stream before test
+	_ = store.client.Del(ctx, KeyPublicStream).Err()
+
+	// Push 65 messages
+	for i := 1; i <= 65; i++ {
+		msg := fmt.Sprintf("message-%03d", i)
+		if err := store.PushPublicMessage(ctx, []byte(msg)); err != nil {
+			t.Fatalf("push error at message %d: %v", i, err)
+		}
+	}
+
+	// Fetch messages: should be capped strictly at 50 messages
+	messages, err := store.GetPublicMessages(ctx, 100)
+	if err != nil {
+		t.Fatalf("fetch error: %v", err)
+	}
+
+	if len(messages) != PublicStreamCap {
+		t.Fatalf("expected capped count %d, got %d", PublicStreamCap, len(messages))
+	}
+
+	// Because we pushed 1..65, messages 16..65 should be kept (50 total).
+	// Chronological order: oldest kept should be message-016, newest should be message-065.
+	firstMsg := string(messages[0])
+	lastMsg := string(messages[len(messages)-1])
+
+	if firstMsg != "message-016" {
+		t.Fatalf("expected oldest message 'message-016', got %s", firstMsg)
+	}
+	if lastMsg != "message-065" {
+		t.Fatalf("expected newest message 'message-065', got %s", lastMsg)
+	}
+}
