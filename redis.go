@@ -215,3 +215,62 @@ func (r *RedisStore) DeleteP2PRoom(ctx context.Context, code string) error {
 }
 
 // -----------------------------------------------------------------------------
+// Group Room Operations
+// -----------------------------------------------------------------------------
+
+// AddGroupMember adds a client ID to key `room:group:{code}` and updates TTL.
+func (r *RedisStore) AddGroupMember(ctx context.Context, code, clientID string) error {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	key := KeyPrefixGroup + code
+	pipe := r.client.Pipeline()
+	pipe.SAdd(ctx, key, clientID)
+	pipe.Expire(ctx, key, GroupRoomTTL)
+	_, err := pipe.Exec(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to add group member: %w", err)
+	}
+	return nil
+}
+
+// RemoveGroupMember removes a client ID from key `room:group:{code}`.
+// If room becomes empty, the key is deleted immediately.
+func (r *RedisStore) RemoveGroupMember(ctx context.Context, code, clientID string) (int64, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	key := KeyPrefixGroup + code
+	removed, err := r.client.SRem(ctx, key, clientID).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove group member: %w", err)
+	}
+	if removed == 0 {
+		return 0, nil
+	}
+
+	count, err := r.client.SCard(ctx, key).Result()
+	if err != nil {
+		return 0, fmt.Errorf("failed to inspect group cardinality: %w", err)
+	}
+
+	if count == 0 {
+		_ = r.client.Del(ctx, key).Err()
+	}
+
+	return count, nil
+}
+
+// GetGroupMembers returns all active member IDs for a group room.
+func (r *RedisStore) GetGroupMembers(ctx context.Context, code string) ([]string, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+
+	members, err := r.client.SMembers(ctx, KeyPrefixGroup+code).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch group members: %w", err)
+	}
+	return members, nil
+}
+
+// -----------------------------------------------------------------------------
