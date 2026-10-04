@@ -319,3 +319,24 @@ func (r *RedisStore) GetPublicMessages(ctx context.Context, limit int64) ([][]by
 }
 
 // -----------------------------------------------------------------------------
+// Metrics & Connection Counters
+// -----------------------------------------------------------------------------
+
+// IncrActiveConnections increments active connection metric.
+func (r *RedisStore) IncrActiveConnections(ctx context.Context) (int64, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+	return r.client.Incr(ctx, KeyMetricConn).Result()
+}
+
+// DecrActiveConnections decrements active connection metric.
+func (r *RedisStore) DecrActiveConnections(ctx context.Context) (int64, error) {
+	ctx, cancel := r.ensureContext(ctx)
+	defer cancel()
+	return r.client.Decr(ctx, KeyMetricConn).Result()
+}
+
+// Close gracefully closes the Redis connection pool.
+func (r *RedisStore) Close() error {
+	return r.client.Close()
+}
