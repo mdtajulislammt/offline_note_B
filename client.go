@@ -144,3 +144,35 @@ func (c *Client) Close() {
 	})
 }
 
+// readPump pumps messages from the websocket connection to the hub signaling router.
+//
+// The application runs readPump in a per-connection goroutine. The application
+// ensures that there is at most one reader on a connection by executing all
+// reads from this goroutine.
+func (c *Client) readPump() {
+	defer func() {
+		c.hub.unregister <- c
+		c.Close()
+	}()
+
+	c.conn.SetReadLimit(maxMessageSize)
+	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+	c.conn.SetPongHandler(func(string) error {
+		_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
+
+	for {
+		_, message, err := c.conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure, websocket.CloseNormalClosure) {
+				slog.Error("websocket read error", "client_id", c.ID, "err", err)
+			}
+			break
+		}
+
+		// Dispatch through signaling protocol router
+		c.hub.signaling.HandleMessage(c, message)
+	}
+}
+
