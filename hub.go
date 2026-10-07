@@ -320,3 +320,78 @@ func (h *Hub) BroadcastToGroup(roomCode string, msg []byte, excludeClientID stri
 	}
 }
 
+// SetP2PPairing registers or updates an in-memory P2P pairing.
+func (h *Hub) SetP2PPairing(code string, host, peer *Client, status string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	h.p2pPairings[code] = &P2PPairing{
+		Code:   code,
+		Host:   host,
+		Peer:   peer,
+		Status: status,
+	}
+	if host != nil {
+		host.SetP2PRoom(code)
+	}
+	if peer != nil {
+		peer.SetP2PRoom(code)
+	}
+}
+
+// GetP2PPairing retrieves an in-memory P2P pairing.
+func (h *Hub) GetP2PPairing(code string) (*P2PPairing, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	pairing, exists := h.p2pPairings[code]
+	return pairing, exists
+}
+
+// RemoveP2PPairing removes in-memory P2P tracking.
+func (h *Hub) RemoveP2PPairing(code string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if pairing, exists := h.p2pPairings[code]; exists {
+		if pairing.Host != nil {
+			pairing.Host.SetP2PRoom("")
+		}
+		if pairing.Peer != nil {
+			pairing.Peer.SetP2PRoom("")
+		}
+		delete(h.p2pPairings, code)
+	}
+}
+
+// GetMetrics returns real-time snapshot metrics.
+func (h *Hub) GetMetrics() PublicMetricsPayload {
+	h.mu.RLock()
+	groupCount := int64(len(h.groupRooms))
+	p2pCount := int64(len(h.p2pPairings))
+	h.mu.RUnlock()
+
+	return PublicMetricsPayload{
+		ActiveConnections: h.activeConnections.Load(),
+		ActiveGroupRooms:  groupCount,
+		ActiveP2PRooms:    p2pCount,
+		UptimeSeconds:     int64(time.Since(h.startTime).Seconds()),
+	}
+}
+
+func (h *Hub) cleanupAll() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	for client := range h.clients {
+		client.Close()
+		delete(h.clients, client)
+	}
+	h.clientsByID = make(map[string]*Client)
+	h.groupRooms = make(map[string]map[*Client]bool)
+	h.p2pPairings = make(map[string]*P2PPairing)
+}
+
+// Close gracefully stops the Hub coordinator.
+func (h *Hub) Close() {
+	close(h.shutdown)
+	<-h.done
+}
