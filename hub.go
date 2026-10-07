@@ -237,3 +237,63 @@ func (h *Hub) BroadcastExcept(msg []byte, excludeClientID string) {
 	}
 }
 
+// SendToClient sends a message directly to a client by ID.
+func (h *Hub) SendToClient(clientID string, msg []byte) bool {
+	h.mu.RLock()
+	client, exists := h.clientsByID[clientID]
+	h.mu.RUnlock()
+
+	if !exists {
+		return false
+	}
+	return client.Send(msg)
+}
+
+// GetClient retrieves a client pointer safely.
+func (h *Hub) GetClient(clientID string) (*Client, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	client, exists := h.clientsByID[clientID]
+	return client, exists
+}
+
+// AddClientToGroup adds a client to a group room tracking list.
+func (h *Hub) AddClientToGroup(roomCode string, c *Client) []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	members, exists := h.groupRooms[roomCode]
+	if !exists {
+		members = make(map[*Client]bool)
+		h.groupRooms[roomCode] = members
+	}
+	members[c] = true
+	c.AddGroupRoom(roomCode)
+
+	// Collect member IDs
+	memberIDs := make([]string, 0, len(members))
+	for m := range members {
+		memberIDs = append(memberIDs, m.ID)
+	}
+	return memberIDs
+}
+
+// RemoveClientFromGroup removes a client from a group room tracking list.
+func (h *Hub) RemoveClientFromGroup(roomCode string, c *Client) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	c.RemoveGroupRoom(roomCode)
+	members, exists := h.groupRooms[roomCode]
+	if !exists {
+		return 0
+	}
+
+	delete(members, c)
+	remaining := len(members)
+	if remaining == 0 {
+		delete(h.groupRooms, roomCode)
+	}
+	return remaining
+}
+
