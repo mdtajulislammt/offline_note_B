@@ -297,3 +297,26 @@ func (h *Hub) RemoveClientFromGroup(roomCode string, c *Client) int {
 	return remaining
 }
 
+// BroadcastToGroup sends a message to all members of a group room, optionally excluding sender.
+func (h *Hub) BroadcastToGroup(roomCode string, msg []byte, excludeClientID string) {
+	h.mu.RLock()
+	members, exists := h.groupRooms[roomCode]
+	if !exists {
+		h.mu.RUnlock()
+		return
+	}
+
+	// Copy pointers under read lock to minimize critical section
+	targets := make([]*Client, 0, len(members))
+	for client := range members {
+		if client.ID != excludeClientID {
+			targets = append(targets, client)
+		}
+	}
+	h.mu.RUnlock()
+
+	for _, client := range targets {
+		client.Send(msg)
+	}
+}
+
